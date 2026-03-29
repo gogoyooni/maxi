@@ -1,5 +1,3 @@
-import { streamText, tool } from 'ai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { FileReadTool } from './tools/read.js';
 import { FileWriteTool } from './tools/write.js';
 import { BashTool } from './tools/bash.js';
@@ -19,31 +17,21 @@ export class MaximAgent {
     this.sessionHistory = [];
   }
 
-  get provider() {
-    return createOpenAICompatible({
-      baseURL: MAXIM_BASE_URL,
-      apiKey: MAXIM_API_KEY,
-    });
-  }
-
   get tools() {
     return {
-      read: tool({
+      read: {
         description: 'Read file contents',
-        parameters: {
+        inputSchema: {
           type: 'object',
           properties: {
             filePath: { type: 'string', description: 'Path to the file to read' },
           },
           required: ['filePath'],
         },
-        execute: async ({ filePath }) => {
-          return new FileReadTool().execute(filePath, this.workingDirectory);
-        },
-      }),
-      write: tool({
+      },
+      write: {
         description: 'Write content to a file',
-        parameters: {
+        inputSchema: {
           type: 'object',
           properties: {
             filePath: { type: 'string', description: 'Path to the file to write' },
@@ -51,13 +39,10 @@ export class MaximAgent {
           },
           required: ['filePath', 'content'],
         },
-        execute: async ({ filePath, content }) => {
-          return new FileWriteTool().execute(filePath, content, this.workingDirectory);
-        },
-      }),
-      edit: tool({
+      },
+      edit: {
         description: 'Edit a specific part of a file',
-        parameters: {
+        inputSchema: {
           type: 'object',
           properties: {
             filePath: { type: 'string', description: 'Path to the file to edit' },
@@ -66,73 +51,97 @@ export class MaximAgent {
           },
           required: ['filePath', 'oldString', 'newString'],
         },
-        execute: async ({ filePath, oldString, newString }) => {
-          return new EditTool().execute(filePath, oldString, newString, this.workingDirectory);
-        },
-      }),
-      glob: tool({
+      },
+      glob: {
         description: 'Find files matching a glob pattern',
-        parameters: {
+        inputSchema: {
           type: 'object',
           properties: {
-            pattern: { type: 'string', description: 'Glob pattern to match (e.g., **/*.js)' },
+            pattern: { type: 'string', description: 'Glob pattern to match' },
           },
           required: ['pattern'],
         },
-        execute: async ({ pattern }) => {
-          return new GlobTool().execute(pattern, this.workingDirectory);
-        },
-      }),
-      grep: tool({
+      },
+      grep: {
         description: 'Search for text in files',
-        parameters: {
+        inputSchema: {
           type: 'object',
           properties: {
             pattern: { type: 'string', description: 'Regex pattern to search for' },
-            include: { type: 'string', description: 'File pattern to filter by (e.g., *.js)' },
+            include: { type: 'string', description: 'File pattern to filter by' },
           },
           required: ['pattern'],
         },
-        execute: async ({ pattern, include }) => {
-          return new GrepTool().execute(pattern, include, this.workingDirectory);
-        },
-      }),
-      bash: tool({
+      },
+      bash: {
         description: 'Execute a bash command',
-        parameters: {
+        input_schema: {
           type: 'object',
           properties: {
             command: { type: 'string', description: 'The bash command to execute' },
           },
           required: ['command'],
         },
-        execute: async ({ command }) => {
-          return new BashTool().execute(command, this.workingDirectory);
-        },
-      }),
+      },
     };
   }
 
   systemPrompt() {
     return `You are maxi, an expert AI coding agent built by Taeyun. You help developers with coding tasks.
 
-You have access to powerful tools:
-- read: Read file contents
-- write: Write content to a file
-- edit: Edit specific parts of a file
-- glob: Find files matching a pattern
-- grep: Search for text in files
-- bash: Execute bash commands
+You have access to tools: read, write, edit, glob, grep, bash.
 
-Working directory: ${this.workingDirectory}
+Working directory: ${this.workingDirectory}`;
+  }
 
-When using tools:
-- Always be concise and focused
-- Prefer existing file patterns and conventions
-- Ask clarifying questions if needed
-- Show your work through file operations, not explanations
+  async callAPI(messages) {
+    const response = await fetch(`${MAXIM_BASE_URL}/messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${MAXIM_API_KEY}`,
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: 4096,
+        messages,
+      }),
+    });
 
-Format your responses to include tool calls when needed.`;
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`API Error: ${response.status} - ${error}`);
+    }
+
+    return await response.json();
+  }
+
+  async executeTool(toolName, toolInput) {
+    const filePath = toolInput.filePath || toolInput.path;
+    const content = toolInput.content;
+    const command = toolInput.command;
+    const pattern = toolInput.pattern;
+    const include = toolInput.include;
+    const oldString = toolInput.oldString;
+    const newString = toolInput.newString;
+
+    switch (toolName) {
+      case 'read':
+        return new FileReadTool().execute(filePath, this.workingDirectory);
+      case 'write':
+        return new FileWriteTool().execute(filePath, content, this.workingDirectory);
+      case 'edit':
+        return new EditTool().execute(filePath, oldString, newString, this.workingDirectory);
+      case 'glob':
+        return new GlobTool().execute(pattern, this.workingDirectory);
+      case 'grep':
+        return new GrepTool().execute(pattern, include, this.workingDirectory);
+      case 'bash':
+        return new BashTool().execute(command, this.workingDirectory);
+      default:
+        return { error: `Unknown tool: ${toolName}` };
+    }
   }
 
   async run(initialMessage) {
@@ -145,33 +154,50 @@ Format your responses to include tool calls when needed.`;
       ];
     }
 
-    let fullResponse = '';
-    const toolResults = [];
+    try {
+      const result = await this.callAPI(this.messages);
+      
+      // Extract text from response
+      const textBlock = result.content?.find(c => c.type === 'text');
+      const fullResponse = textBlock?.text || '';
 
-    const result = await streamText({
-      model: this.provider(this.model),
-      messages: this.messages,
-      tools: this.tools,
-      maxTokens: 8192,
-    });
+      // Check for tool use
+      const toolUses = result.content?.filter(c => c.type === 'tool_use') || [];
 
-    for await (const chunk of result.fullStream) {
-      if (chunk.type === 'text-delta') {
-        process.stdout.write(chunk.delta);
-        fullResponse += chunk.delta;
-      } else if (chunk.type === 'tool-call') {
-        console.log(`\n✱ Calling tool: ${chunk.toolName}`);
-        toolResults.push({ tool: chunk.toolName, args: chunk.args });
+      if (toolUses.length > 0) {
+        console.log();
+        for (const tool of toolUses) {
+          console.log(`⚡ Calling tool: ${tool.name}`);
+          const toolResult = await this.executeTool(tool.name, tool.input);
+          console.log(`Result: ${JSON.stringify(toolResult).slice(0, 200)}`);
+          
+          this.messages.push({
+            role: 'assistant',
+            content: result.content.filter(c => c.type !== 'tool_use').map(c => c.text).join('\n')
+          });
+          this.messages.push({
+            role: 'user',
+            content: `Tool ${tool.name} result: ${JSON.stringify(toolResult)}`
+          });
+
+          // Get follow-up response
+          const followUp = await this.callAPI(this.messages);
+          const followUpText = followUp.content?.find(c => c.type === 'text')?.text || '';
+          console.log(`\n${followUpText}`);
+          
+          this.messages.push({ role: 'assistant', content: followUpText });
+          return { response: followUpText };
+        }
       }
-    }
-    
-    this.messages.push({ role: 'assistant', content: fullResponse });
-    this.sessionHistory.push(...this.messages.slice(-2));
 
-    return {
-      response: fullResponse,
-      toolCalls: toolResults,
-      sessionHistory: this.sessionHistory,
-    };
+      console.log(`\n${fullResponse}`);
+      this.messages.push({ role: 'assistant', content: fullResponse });
+      this.sessionHistory.push(...this.messages.slice(-2));
+
+      return { response: fullResponse };
+    } catch (error) {
+      console.error('Error:', error.message);
+      throw error;
+    }
   }
 }
