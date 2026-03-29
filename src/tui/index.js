@@ -620,6 +620,20 @@ Working directory: ${this.workingDirectory}`;
 
     if (rawText) {
       await this.parseAndDisplay(rawText);
+      
+      const detectedTools = await this.detectAndExecuteTools(rawText);
+      if (detectedTools.length > 0) {
+        this.println(`\n  ${C.cyan}⚡ Auto-executed ${detectedTools.length} detected tool(s)${C.reset}`);
+        for (const t of detectedTools) {
+          if (t.error) {
+            this.println(`  ${C.red}✗ ${t.name}: ${t.error}${C.reset}`);
+          } else {
+            this.println(`  ${C.green}✓ ${t.name}${C.reset}`);
+          }
+        }
+        this.println('');
+      }
+      
       this.messages.push({ role: 'assistant', content: rawText });
       this.scrollback.push({ role: 'assistant', preview: rawText.slice(0, 60) });
     }
@@ -627,6 +641,61 @@ Working directory: ${this.workingDirectory}`;
     if (result.usage) {
       this.tokenCount += result.usage.output_tokens || 0;
     }
+  }
+
+  async detectAndExecuteTools(text) {
+    const toolCalls = [];
+    
+    const toolCallBlockRegex = /\[TOOL_CALL\]\s*\n\s*name:\s*(\w+)\s*\n\s*args:\s*\n([\s\S]*?)(?=\[TOOL_CALL\]|$)/gi;
+    let match;
+    while ((match = toolCallBlockRegex.exec(text)) !== null) {
+      const name = match[1].toLowerCase();
+      const argsText = match[2];
+      const args = this.parseArgsText(argsText);
+      toolCalls.push({ name, input: args, id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` });
+    }
+    
+    const toolPathRegex = /Tool:\s*(\w+)[,\s]+Path:\s*([^\s,\n]+)/gi;
+    while ((match = toolPathRegex.exec(text)) !== null) {
+      const name = match[1].toLowerCase();
+      const path = match[2];
+      toolCalls.push({ name, input: { file_path: path }, id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` });
+    }
+    
+    const bashRunRegex = /(?:^|\n)(?:run|execute|bash|cmd):\s*(.+?)(?=\n|$)/gim;
+    while ((match = bashRunRegex.exec(text)) !== null) {
+      const command = match[1].trim();
+      if (command && command.length > 0) {
+        toolCalls.push({ name: 'bash', input: { command }, id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` });
+      }
+    }
+    
+    if (toolCalls.length === 0) return [];
+    
+    const results = [];
+    for (const tool of toolCalls) {
+      const result = await this.executeTool(tool);
+      results.push(result);
+    }
+    
+    return results;
+  }
+
+  parseArgsText(argsText) {
+    const args = {};
+    const lines = argsText.split('\n');
+    for (const line of lines) {
+      const kvMatch = line.match(/^\s*(\w+):\s*(.+)$/);
+      if (kvMatch) {
+        const key = kvMatch[1];
+        let value = kvMatch[2].trim();
+        if (value === 'true') value = true;
+        else if (value === 'false') value = false;
+        else if (!isNaN(value) && value !== '') value = Number(value);
+        args[key] = value;
+      }
+    }
+    return args;
   }
 
   showTree(dir = null, prefix = '', depth = 0) {
