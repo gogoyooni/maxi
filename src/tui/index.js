@@ -2,7 +2,7 @@
 
 import { createInterface } from 'readline';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, isAbsolute } from 'path';
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { parseArgs } from 'util';
@@ -99,7 +99,7 @@ class MaxiTUI {
       
       switch (name) {
         case 'read': {
-          const filePath = join(this.workingDirectory, input.file_path);
+          const filePath = isAbsolute(input.file_path) ? input.file_path : join(this.workingDirectory, input.file_path);
           const content = readFileSync(filePath, 'utf-8');
           result = { content, lines: content.split('\n').length };
           this.println(`  ${C.green}✓ Read ${result.lines} lines${C.reset}`);
@@ -107,7 +107,7 @@ class MaxiTUI {
         }
         
         case 'write': {
-          const filePath = join(this.workingDirectory, input.file_path);
+          const filePath = isAbsolute(input.file_path) ? input.file_path : join(this.workingDirectory, input.file_path);
           this.trackFile(filePath);
           const newContent = input.content;
           writeFileSync(filePath, newContent, 'utf-8');
@@ -118,7 +118,7 @@ class MaxiTUI {
         }
         
         case 'edit': {
-          const filePath = join(this.workingDirectory, input.file_path);
+          const filePath = isAbsolute(input.file_path) ? input.file_path : join(this.workingDirectory, input.file_path);
           this.trackFile(filePath);
           let content = readFileSync(filePath, 'utf-8');
           const oldContent = content;
