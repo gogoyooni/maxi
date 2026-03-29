@@ -20,7 +20,7 @@ if (args.values.help) {
 }
 
 const API_KEY = process.env.MINIMAX_API_KEY;
-const BASE_URL = 'https://api.minimax.io/anthropic/v1';
+const BASE_URL = 'https://api.minimax.io/anthropic';
 if (!API_KEY) { log('✗', 'MINIMAX_API_KEY not set!', 'red'); process.exit(1); }
 
 const message = args.positionals.slice(2).join(' ') || '';

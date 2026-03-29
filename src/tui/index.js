@@ -133,7 +133,7 @@ class MaxiTUI {
 
   async callMinimax(messages) {
     const API_KEY = process.env.MINIMAX_API_KEY;
-    const BASE_URL = 'https://api.minimax.io/anthropic/v1';
+    const BASE_URL = 'https://api.minimax.io/anthropic';
 
     const response = await fetch(`${BASE_URL}/messages`, {
       method: 'POST',

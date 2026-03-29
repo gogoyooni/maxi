@@ -6,7 +6,7 @@ import { GrepTool } from './tools/grep.js';
 import { EditTool } from './tools/edit.js';
 
 const MAXIM_API_KEY = process.env.MINIMAX_API_KEY;
-const MAXIM_BASE_URL = process.env.MAXIM_BASE_URL || 'https://api.minimax.io/anthropic/v1';
+const MAXIM_BASE_URL = process.env.MAXIM_BASE_URL || 'https://api.minimax.io/anthropic';
 
 export class MaximAgent {
   constructor(options = {}) {
