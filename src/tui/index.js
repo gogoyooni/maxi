@@ -105,10 +105,9 @@ Working directory: ${this.workingDirectory}`;
     let frame = 0;
     let cleared = false;
     const interval = setInterval(() => {
-      this.clearLine();
-      this.print(`  ${C.cyan}◆${C.reset} ${C.cyan}Thinking${C.reset} ${SPINNER_FRAMES[frame % SPINNER_FRAMES.length]}`);
+      process.stdout.write(`\r  ${C.cyan}◆${C.reset} ${C.cyan}Thinking${C.reset} ${SPINNER_FRAMES[frame % SPINNER_FRAMES.length]}    `);
       frame++;
-    }, 80);
+    }, 150);
 
     try {
       const result = await promise;
@@ -231,10 +230,9 @@ Working directory: ${this.workingDirectory}`;
     this.isStreaming = true;
     let frame = 0;
     const spinnerInterval = setInterval(() => {
-      this.clearLine();
-      this.print(`  ${C.cyan}◆${C.reset} ${C.cyan}Streaming${C.reset} ${SPINNER_FRAMES[frame % SPINNER_FRAMES.length]}`);
+      process.stdout.write(`\r  ${C.cyan}◆${C.reset} ${C.cyan}Streaming${C.reset} ${SPINNER_FRAMES[frame % SPINNER_FRAMES.length]}    `);
       frame++;
-    }, 80);
+    }, 150);
 
     try {
       let fullText = '';
