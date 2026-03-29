@@ -19,7 +19,7 @@ const args = parseArgs({
 });
 
 const API_KEY = process.env.MINIMAX_API_KEY;
-const BASE_URL = 'https://api.minimax.io/anthropic';
+const BASE_URL = 'https://api.minimax.io/anthropic/v1';
 
 if (!API_KEY) {
   console.error('MINIMAX_API_KEY not set!');
