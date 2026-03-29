@@ -466,6 +466,8 @@ Working directory: ${this.workingDirectory}`;
   }
   
   async makeAPIRequest(messages) {
+    const API_KEY = process.env.MINIMAX_API_KEY;
+    const BASE_URL = process.env.MAXIM_BASE_URL || 'https://api.minimax.io/anthropic/v1';
 
     const tools = [
       {
