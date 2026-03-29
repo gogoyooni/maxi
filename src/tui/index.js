@@ -431,8 +431,11 @@ Working directory: ${this.workingDirectory}`;
     const allMessages = [systemMessage, ...this.messages];
     
     if (toolResults.length > 0) {
-      allMessages.push({ role: 'user', content: toolResults });
-    } else {
+      // Push each tool result as a separate message
+      for (const msg of toolResults) {
+        allMessages.push(msg);
+      }
+    } else if (userMessage) {
       allMessages.push({ role: 'user', content: userMessage });
     }
 
