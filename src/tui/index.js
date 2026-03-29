@@ -533,7 +533,7 @@ Working directory: ${this.workingDirectory}`;
       body: JSON.stringify({
         model: this.model,
         max_tokens: 8192,
-        messages: allMessages,
+        messages: messages,
         tools,
       }),
     });
