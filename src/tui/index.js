@@ -405,8 +405,6 @@ Working directory: ${this.workingDirectory}`;
 
     this.messages.push({ role: 'user', content: trimmed });
     this.scrollback.push({ role: 'user', preview: trimmed });
-    
-    this.println(`\n  ${C.green}› ${trimmed}${C.reset}\n`);
 
     try {
       const result = await this.thinkingAnimation(this.callAPI(trimmed));
