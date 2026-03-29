@@ -670,23 +670,16 @@ Working directory: ${this.workingDirectory}`;
       
       const results = await this.executeTools(toolUses);
       
-      // Save assistant message with tool calls
-      this.messages.push({ role: 'assistant', content: result.content });
-      
-      // Add tool results as user messages
+      // Show summary of what was done
+      this.println(`\n  ${C.green}✓ Tools executed successfully${C.reset}`);
       for (const r of results) {
-        const toolResultText = 'Tool ' + r.name + ' result: ' + JSON.stringify(r.result);
-        this.messages.push({ role: 'user', content: toolResultText });
+        if (r.result && !r.result.error) {
+          this.println(`  ${C.green}✓ ${r.name}${C.reset}`);
+        } else if (r.result && r.result.error) {
+          this.println(`  ${C.red}✗ ${r.name}: ${r.result.error}${C.reset}`);
+        }
       }
-      
-      // Now get follow-up from API with tool results
-      const followUp = await this.thinkingAnimation(
-        this.callAPIWithHistory()
-      );
-      
-      if (followUp) {
-        await this.processResponse(followUp);
-      }
+      this.println(`\n  ${C.dim}Continue the conversation...${C.reset}\n`);
       return;
     }
 
