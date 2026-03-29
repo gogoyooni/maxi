@@ -641,12 +641,7 @@ Working directory: ${this.workingDirectory}`;
       
       const toolResultMessages = results.map(r => ({
         role: 'user',
-        content: [{
-          type: 'tool_result',
-          tool_use_id: r.id,
-          content: r.result.error || JSON.stringify(r.result),
-          is_error: r.is_error
-        }]
+        content: 'Tool ' + r.name + ' result: ' + JSON.stringify(r.result)
       }));
       
       const followUp = await this.thinkingAnimation(
