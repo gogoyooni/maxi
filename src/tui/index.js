@@ -3,7 +3,8 @@
 import { createInterface } from 'readline';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { readdirSync, statSync } from 'fs';
+import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { spawn } from 'child_process';
 import { parseArgs } from 'util';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -65,6 +66,153 @@ class MaxiTUI {
     this.tokenCount = 0;
     this.scrollback = [];
     this.isStreaming = false;
+    this.fileTracker = new Map();
+  }
+
+  trackFile(filePath) {
+    try {
+      if (existsSync(filePath)) {
+        this.fileTracker.set(filePath, readFileSync(filePath, 'utf-8'));
+      } else {
+        this.fileTracker.set(filePath, null);
+      }
+    } catch {
+      this.fileTracker.set(filePath, null);
+    }
+  }
+
+  getOriginalContent(filePath) {
+    return this.fileTracker.get(filePath);
+  }
+
+  clearFileTracking(filePath) {
+    this.fileTracker.delete(filePath);
+  }
+
+  async executeTool(toolUse) {
+    const { name, input, id } = toolUse;
+    
+    this.println(`\n  ${s.tool}${C.cyan}${name}${C.reset} ${C.dim}(${id})${C.reset}`);
+    
+    try {
+      let result;
+      
+      switch (name) {
+        case 'read': {
+          const filePath = join(this.workingDirectory, input.file_path);
+          const content = readFileSync(filePath, 'utf-8');
+          result = { content, lines: content.split('\n').length };
+          this.println(`  ${C.green}✓ Read ${result.lines} lines${C.reset}`);
+          break;
+        }
+        
+        case 'write': {
+          const filePath = join(this.workingDirectory, input.file_path);
+          this.trackFile(filePath);
+          const newContent = input.content;
+          writeFileSync(filePath, newContent, 'utf-8');
+          const oldContent = this.getOriginalContent(filePath);
+          this.showDiff(oldContent, newContent, input.file_path);
+          result = { written: true, path: input.file_path };
+          break;
+        }
+        
+        case 'edit': {
+          const filePath = join(this.workingDirectory, input.file_path);
+          this.trackFile(filePath);
+          let content = readFileSync(filePath, 'utf-8');
+          const oldContent = content;
+          
+          if (input.old_string) {
+            if (input.old_string === content) {
+              content = input.new_string;
+            } else if (content.includes(input.old_string)) {
+              content = content.replace(input.old_string, input.new_string);
+            } else {
+              throw new Error(`old_string not found in file`);
+            }
+          } else if (input.replace_all) {
+            content = input.new_string;
+          } else {
+            const lines = content.split('\n');
+            const startLine = input.start_line || 0;
+            const endLine = input.end_line || lines.length;
+            lines.splice(startLine, endLine - startLine, input.new_string);
+            content = lines.join('\n');
+          }
+          
+          writeFileSync(filePath, content, 'utf-8');
+          this.showDiff(oldContent, content, input.file_path);
+          result = { edited: true, path: input.file_path };
+          break;
+        }
+        
+        case 'bash': {
+          const { command, timeout = 30 } = input;
+          this.println(`  ${C.dim}${C.italic}${command}${C.reset}`);
+          
+          result = await new Promise((resolve, reject) => {
+            const proc = spawn(command, [], {
+              shell: true,
+              cwd: this.workingDirectory,
+              timeout: timeout * 1000
+            });
+            
+            let stdout = '';
+            let stderr = '';
+            
+            proc.stdout.on('data', (data) => {
+              stdout += data.toString();
+            });
+            
+            proc.stderr.on('data', (data) => {
+              stderr += data.toString();
+            });
+            
+            proc.on('close', (code) => {
+              resolve({ stdout, stderr, exit_code: code });
+            });
+            
+            proc.on('error', reject);
+          });
+          
+          if (result.stdout) {
+            const outputLines = result.stdout.split('\n').slice(0, 50);
+            outputLines.forEach(line => this.println(`  ${C.dim}${line}${C.reset}`));
+            if (result.stdout.split('\n').length > 50) {
+              this.println(`  ${C.dim}...${C.reset}`);
+            }
+          }
+          if (result.stderr) {
+            this.println(`  ${C.red}${result.stderr}${C.reset}`);
+          }
+          this.println(`  ${C.green}✓ Exit code: ${result.exit_code}${C.reset}`);
+          break;
+        }
+        
+        default:
+          result = { error: `Unknown tool: ${name}` };
+      }
+      
+      return { id, name, result, type: 'tool_result' };
+    } catch (error) {
+      return { id, name, result: { error: error.message }, type: 'tool_result', is_error: true };
+    }
+  }
+
+  async executeTools(toolUses) {
+    const results = [];
+    
+    for (const tool of toolUses) {
+      const result = await this.executeTool(tool);
+      results.push(result);
+      
+      if (result.result?.error) {
+        this.println(`  ${C.red}✗ ${result.result.error}${C.reset}`);
+      }
+    }
+    
+    return results;
   }
 
   systemPrompt() {
@@ -274,14 +422,72 @@ Working directory: ${this.workingDirectory}`;
     }
   }
 
-  async callAPI(userMessage) {
+  async callAPI(userMessage, toolResults = []) {
     const API_KEY = process.env.MINIMAX_API_KEY;
     const BASE_URL = process.env.MAXIM_BASE_URL || 'https://api.minimax.io/anthropic/v1';
 
-    const messages = [
-      { role: 'system', content: this.systemPrompt() },
-      ...this.messages,
-      { role: 'user', content: userMessage }
+    const systemMessage = { role: 'system', content: this.systemPrompt() };
+    
+    const allMessages = [systemMessage, ...this.messages];
+    
+    if (toolResults.length > 0) {
+      allMessages.push({ role: 'user', content: toolResults });
+    } else {
+      allMessages.push({ role: 'user', content: userMessage });
+    }
+
+    const tools = [
+      {
+        name: 'read',
+        description: 'Read file contents',
+        input_schema: {
+          type: 'object',
+          properties: {
+            file_path: { type: 'string', description: 'Path to file to read' }
+          },
+          required: ['file_path']
+        }
+      },
+      {
+        name: 'write',
+        description: 'Write content to a file, creating or overwriting',
+        input_schema: {
+          type: 'object',
+          properties: {
+            file_path: { type: 'string', description: 'Path to file to write' },
+            content: { type: 'string', description: 'Content to write' }
+          },
+          required: ['file_path', 'content']
+        }
+      },
+      {
+        name: 'edit',
+        description: 'Edit a file by replacing old_string or modifying specific lines',
+        input_schema: {
+          type: 'object',
+          properties: {
+            file_path: { type: 'string', description: 'Path to file to edit' },
+            old_string: { type: 'string', description: 'String to replace' },
+            new_string: { type: 'string', description: 'Replacement string' },
+            start_line: { type: 'integer', description: 'Start line for replacement' },
+            end_line: { type: 'integer', description: 'End line for replacement' },
+            replace_all: { type: 'boolean', description: 'Replace all occurrences' }
+          },
+          required: ['file_path', 'new_string']
+        }
+      },
+      {
+        name: 'bash',
+        description: 'Execute a bash command',
+        input_schema: {
+          type: 'object',
+          properties: {
+            command: { type: 'string', description: 'Command to execute' },
+            timeout: { type: 'integer', description: 'Timeout in seconds', default: 30 }
+          },
+          required: ['command']
+        }
+      }
     ];
 
     const response = await fetch(`${BASE_URL}/messages`, {
@@ -293,8 +499,9 @@ Working directory: ${this.workingDirectory}`;
       },
       body: JSON.stringify({
         model: this.model,
-        max_tokens: 4096,
-        messages,
+        max_tokens: 8192,
+        messages: allMessages,
+        tools,
       }),
     });
 
@@ -331,6 +538,7 @@ Working directory: ${this.workingDirectory}`;
     ${C.dim}• Use ${C.reset}${C.green}[c]${C.reset}${C.dim} after code blocks to copy${C.reset}
     ${C.dim}• Diffs show green (+) and red (-) lines${C.reset}
     ${C.dim}• Responses stream in real-time${C.reset}
+    ${C.dim}• Maxi can execute tools (read, write, edit, bash)${C.reset}
 `);
       return;
     }
@@ -353,6 +561,7 @@ Working directory: ${this.workingDirectory}`;
     if (trimmed === 'new') {
       this.messages = [];
       this.scrollback = [];
+      this.fileTracker.clear();
       this.println(`  ${C.green}✓ New session started${C.reset}\n`);
       return;
     }
@@ -386,7 +595,6 @@ Working directory: ${this.workingDirectory}`;
     if (trimmed.startsWith('diff ')) {
       const file = trimmed.slice(5).trim();
       try {
-        const { readFileSync } = await import('fs');
         const content = readFileSync(file, 'utf-8');
         this.println(`  ${C.yellow}File: ${file}${C.reset}`);
         this.println(`  ${C.dim}${'─'.repeat(60)}${C.reset}\n`);
@@ -406,26 +614,57 @@ Working directory: ${this.workingDirectory}`;
 
     try {
       const result = await this.thinkingAnimation(this.callAPI(trimmed));
-      const rawText = result.content?.find(c => c.type === 'text')?.text || '';
-      const thinking = result.content?.find(c => c.type === 'thinking');
       
-      if (thinking?.thinking) {
-        this.println(`  ${C.cyan}💭 Thinking...${C.reset}`);
-        this.println(`  ${C.dim}${thinking.thinking.slice(0, 200)}${thinking.thinking.length > 200 ? '...' : ''}${C.reset}\n`);
-      }
-
-      await this.parseAndDisplay(rawText);
-      
-      this.messages.push({ role: 'assistant', content: rawText });
-      this.scrollback.push({ role: 'assistant', preview: rawText.slice(0, 60) });
-      
-      if (result.usage) {
-        this.tokenCount += result.usage.output_tokens || 0;
-      }
-      
+      await this.processResponse(result);
       this.updateStatusBar();
     } catch (error) {
       this.println(`\n  ${C.red}✗ ${error.message}${C.reset}\n`);
+    }
+  }
+
+  async processResponse(result, toolResults = []) {
+    const toolUses = result.content?.filter(c => c.type === 'tool_use') || [];
+    const rawText = result.content?.find(c => c.type === 'text')?.text || '';
+    const thinking = result.content?.find(c => c.type === 'thinking');
+    
+    if (thinking?.thinking) {
+      this.println(`  ${C.cyan}💭 Thinking...${C.reset}`);
+      this.println(`  ${C.dim}${thinking.thinking.slice(0, 200)}${thinking.thinking.length > 200 ? '...' : ''}${C.reset}\n`);
+    }
+
+    if (toolUses.length > 0) {
+      this.println(`\n  ${C.cyan}⚡ Executing ${toolUses.length} tool(s)${C.reset}`);
+      
+      const results = await this.executeTools(toolUses);
+      
+      this.messages.push({ role: 'assistant', content: result.content });
+      
+      const toolResultMessages = results.map(r => ({
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: r.id,
+          content: r.result.error || JSON.stringify(r.result),
+          is_error: r.is_error
+        }]
+      }));
+      
+      const followUp = await this.thinkingAnimation(
+        this.callAPI(null, toolResultMessages)
+      );
+      
+      await this.processResponse(followUp);
+      return;
+    }
+
+    if (rawText) {
+      await this.parseAndDisplay(rawText);
+      this.messages.push({ role: 'assistant', content: rawText });
+      this.scrollback.push({ role: 'assistant', preview: rawText.slice(0, 60) });
+    }
+    
+    if (result.usage) {
+      this.tokenCount += result.usage.output_tokens || 0;
     }
   }
 
