@@ -296,6 +296,50 @@ Working directory: ${this.workingDirectory}`;
     return output;
   }
 
+  isDiffText(text) {
+    const lines = text.split('\n');
+    let diffLines = 0;
+    let totalNonEmpty = 0;
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      totalNonEmpty++;
+      if (trimmed.startsWith('+') || trimmed.startsWith('-') || 
+          trimmed.startsWith('@@') || trimmed.startsWith('---') || 
+          trimmed.startsWith('+++') || trimmed.startsWith('diff ') ||
+          trimmed.startsWith('index ')) {
+        diffLines++;
+      }
+    }
+    
+    return totalNonEmpty > 0 && diffLines / totalNonEmpty > 0.3;
+  }
+
+  formatDiff(text) {
+    const lines = text.split('\n');
+    const output = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      
+      if (trimmed.startsWith('@@')) {
+        output.push(`${C.cyan}${line}${C.reset}`);
+      } else if (trimmed.startsWith('---') || trimmed.startsWith('+++') || 
+                 trimmed.startsWith('diff ') || trimmed.startsWith('index ')) {
+        output.push(`${C.cyan}${line}${C.reset}`);
+      } else if (trimmed.startsWith('+')) {
+        output.push(`${C.green}${line}${C.reset}`);
+      } else if (trimmed.startsWith('-')) {
+        output.push(`${C.red}${line}${C.reset}`);
+      } else {
+        output.push(line);
+      }
+    }
+    
+    return output.join('\n');
+  }
+
   showDiff(oldContent, newContent, filePath = '') {
     const oldLines = (oldContent || '').split('\n');
     const newLines = (newContent || '').split('\n');
@@ -353,7 +397,10 @@ Working directory: ${this.workingDirectory}`;
 
     for (const part of parts) {
       if (part.type === 'text') {
-        const lines = part.content.split('\n');
+        const textContent = this.isDiffText(part.content) 
+          ? this.formatDiff(part.content) 
+          : part.content;
+        const lines = textContent.split('\n');
         for (const line of lines) {
           if (line.trim()) {
             this.println(`${s.assistant}${line}`);
@@ -393,20 +440,28 @@ Working directory: ${this.workingDirectory}`;
         
         while (buffer.includes('\n')) {
           const newlineIndex = buffer.indexOf('\n');
-          const line = buffer.slice(0, newlineIndex);
+          let line = buffer.slice(0, newlineIndex);
           buffer = buffer.slice(newlineIndex + 1);
           
           if (line.trim()) {
+            if (this.isDiffText(line)) {
+              line = this.formatDiff(line);
+            }
             this.clearLine();
             this.println(`${s.assistant}${line}`);
           }
         }
+        
+        if (buffer.trim()) {
+          let line = buffer;
+          if (this.isDiffText(line)) {
+            line = this.formatDiff(line);
+          }
+          this.println(`${s.assistant}${line}`);
+          fullText += buffer;
+        }
       }
       
-      if (buffer.trim()) {
-        this.println(`${s.assistant}${buffer}`);
-        fullText += buffer;
-      }
       
       clearInterval(spinnerInterval);
       this.clearLine();
