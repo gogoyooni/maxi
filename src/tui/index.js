@@ -409,7 +409,7 @@ Working directory: ${this.workingDirectory}`;
     this.println(`\n  ${C.green}› ${trimmed}${C.reset}\n`);
 
     try {
-      const result = await this.callAPI(trimmed);
+      const result = await this.thinkingAnimation(this.callAPI(trimmed));
       const rawText = result.content?.find(c => c.type === 'text')?.text || '';
       const thinking = result.content?.find(c => c.type === 'thinking');
       
