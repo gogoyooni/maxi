@@ -422,7 +422,7 @@ Working directory: ${this.workingDirectory}`;
     }
   }
 
-  async callAPI(userMessage, toolResults = []) {
+  async callAPI(userMessage) {
     const API_KEY = process.env.MINIMAX_API_KEY;
     const BASE_URL = process.env.MAXIM_BASE_URL || 'https://api.minimax.io/anthropic/v1';
 
@@ -430,14 +430,42 @@ Working directory: ${this.workingDirectory}`;
     
     const allMessages = [systemMessage, ...this.messages];
     
-    if (toolResults.length > 0) {
-      // Push each tool result as a separate message
-      for (const msg of toolResults) {
-        allMessages.push(msg);
-      }
-    } else if (userMessage) {
+    if (userMessage) {
       allMessages.push({ role: 'user', content: userMessage });
     }
+    
+    return this.makeAPIRequest(allMessages);
+  }
+  
+  async callAPIWithHistory() {
+    const API_KEY = process.env.MINIMAX_API_KEY;
+    const BASE_URL = process.env.MAXIM_BASE_URL || 'https://api.minimax.io/anthropic/v1';
+    
+    const systemMessage = { role: 'system', content: this.systemPrompt() };
+    
+    // Build messages from history - convert content blocks to text
+    const historyMessages = this.messages.map(msg => {
+      if (typeof msg.content === 'string') {
+        return msg;
+      }
+      // If content is an array of blocks, extract text
+      if (Array.isArray(msg.content)) {
+        const text = msg.content.map(block => {
+          if (block.type === 'text') return block.text;
+          if (block.type === 'thinking') return '[Thinking: ' + (block.thinking || '').slice(0, 100) + '...]';
+          return '';
+        }).join('\n');
+        return { role: msg.role, content: text };
+      }
+      return msg;
+    });
+    
+    const allMessages = [systemMessage, ...historyMessages];
+    
+    return this.makeAPIRequest(allMessages);
+  }
+  
+  async makeAPIRequest(messages) {
 
     const tools = [
       {
@@ -640,18 +668,23 @@ Working directory: ${this.workingDirectory}`;
       
       const results = await this.executeTools(toolUses);
       
+      // Save assistant message with tool calls
       this.messages.push({ role: 'assistant', content: result.content });
       
-      const toolResultMessages = results.map(r => ({
-        role: 'user',
-        content: 'Tool ' + r.name + ' result: ' + JSON.stringify(r.result)
-      }));
+      // Add tool results as user messages
+      for (const r of results) {
+        const toolResultText = 'Tool ' + r.name + ' result: ' + JSON.stringify(r.result);
+        this.messages.push({ role: 'user', content: toolResultText });
+      }
       
+      // Now get follow-up from API with tool results
       const followUp = await this.thinkingAnimation(
-        this.callAPI(null, toolResultMessages)
+        this.callAPIWithHistory()
       );
       
-      await this.processResponse(followUp);
+      if (followUp) {
+        await this.processResponse(followUp);
+      }
       return;
     }
 
