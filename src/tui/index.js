@@ -443,21 +443,11 @@ Working directory: ${this.workingDirectory}`;
     
     const systemMessage = { role: 'system', content: this.systemPrompt() };
     
-    // Build messages from history - convert content blocks to text
     const historyMessages = this.messages.map(msg => {
       if (typeof msg.content === 'string') {
         return msg;
       }
-      // If content is an array of blocks, extract text
-      if (Array.isArray(msg.content)) {
-        const text = msg.content.map(block => {
-          if (block.type === 'text') return block.text;
-          if (block.type === 'thinking') return '[Thinking: ' + (block.thinking || '').slice(0, 100) + '...]';
-          return '';
-        }).join('\n');
-        return { role: msg.role, content: text };
-      }
-      return msg;
+      return { role: msg.role, content: '[response]' };
     });
     
     const allMessages = [systemMessage, ...historyMessages];
@@ -468,60 +458,6 @@ Working directory: ${this.workingDirectory}`;
   async makeAPIRequest(messages) {
     const API_KEY = process.env.MINIMAX_API_KEY;
     const BASE_URL = process.env.MAXIM_BASE_URL || 'https://api.minimax.io/anthropic/v1';
-
-    const tools = [
-      {
-        name: 'read',
-        description: 'Read file contents',
-        input_schema: {
-          type: 'object',
-          properties: {
-            file_path: { type: 'string', description: 'Path to file to read' }
-          },
-          required: ['file_path']
-        }
-      },
-      {
-        name: 'write',
-        description: 'Write content to a file, creating or overwriting',
-        input_schema: {
-          type: 'object',
-          properties: {
-            file_path: { type: 'string', description: 'Path to file to write' },
-            content: { type: 'string', description: 'Content to write' }
-          },
-          required: ['file_path', 'content']
-        }
-      },
-      {
-        name: 'edit',
-        description: 'Edit a file by replacing old_string or modifying specific lines',
-        input_schema: {
-          type: 'object',
-          properties: {
-            file_path: { type: 'string', description: 'Path to file to edit' },
-            old_string: { type: 'string', description: 'String to replace' },
-            new_string: { type: 'string', description: 'Replacement string' },
-            start_line: { type: 'integer', description: 'Start line for replacement' },
-            end_line: { type: 'integer', description: 'End line for replacement' },
-            replace_all: { type: 'boolean', description: 'Replace all occurrences' }
-          },
-          required: ['file_path', 'new_string']
-        }
-      },
-      {
-        name: 'bash',
-        description: 'Execute a bash command',
-        input_schema: {
-          type: 'object',
-          properties: {
-            command: { type: 'string', description: 'Command to execute' },
-            timeout: { type: 'integer', description: 'Timeout in seconds', default: 30 }
-          },
-          required: ['command']
-        }
-      }
-    ];
 
     const response = await fetch(`${BASE_URL}/messages`, {
       method: 'POST',
@@ -534,7 +470,6 @@ Working directory: ${this.workingDirectory}`;
         model: this.model,
         max_tokens: 8192,
         messages: messages,
-        tools,
       }),
     });
 
