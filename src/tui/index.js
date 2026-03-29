@@ -655,6 +655,16 @@ Working directory: ${this.workingDirectory}`;
       toolCalls.push({ name, input: args, id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` });
     }
     
+    // Pattern 2: <tool_call> XML style with JSON parameters
+    const xmlToolRegex = /<tool_call>\s*\{[^}]*"name"\s*:\s*"([^"]+)"[^}]*"parameters"\s*:\s*(\{[^}]+\})/gi;
+    while ((match = xmlToolRegex.exec(text)) !== null) {
+      const name = match[1].toLowerCase();
+      try {
+        const params = JSON.parse(match[2].replace(/'/g, '"'));
+        toolCalls.push({ name, input: params, id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` });
+      } catch (e) {}
+    }
+    
     const toolPathRegex = /Tool:\s*(\w+)[,\s]+Path:\s*([^\s,\n]+)/gi;
     while ((match = toolPathRegex.exec(text)) !== null) {
       const name = match[1].toLowerCase();
